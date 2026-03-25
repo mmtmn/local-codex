@@ -15,7 +15,7 @@ enum Provider {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "local",
+    name = "local-cli",
     about = "Local open-source coding orchestrator for local/open models"
 )]
 struct Cli {

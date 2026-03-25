@@ -6,7 +6,7 @@ description = "Local open-source coding orchestrator CLI for local LLMs"
 license = "MIT"
 
 [[bin]]
-name = "local"
+name = "local-cli"
 path = "src/main.rs"
 
 [lib]

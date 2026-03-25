@@ -50,7 +50,7 @@ If planner/coder/image are omitted, they fall back to `--text-model`.
 ### 2) Run with Ollama + Qwen
 
 ```bash
-cargo run --bin local -- \
+cargo run --bin local-cli -- \
   --provider ollama \
   --text-model qwen3:8b \
   --endpoint http://127.0.0.1:11434/api/chat
@@ -58,17 +58,19 @@ cargo run --bin local -- \
 
 If your model tag differs, use your installed tag.
 
-Install once so you can just type `local`:
+Install once so you can just type `local-cli`:
 
 ```bash
 cargo install --path .
-local
+local-cli
 ```
+
+Note: on Bash, `local` is a shell builtin keyword, so the executable name is `local-cli`.
 
 ### 3) One-shot prompt mode
 
 ```bash
-cargo run --bin local -- \
+cargo run --bin local-cli -- \
   --provider ollama \
   --text-model qwen3:8b \
   --prompt "List files and summarize this repository"
@@ -94,7 +96,7 @@ cargo run --bin local -- \
 Use `--session-file` to load/save state automatically:
 
 ```bash
-cargo run --bin local -- \
+cargo run --bin local-cli -- \
   --provider ollama \
   --text-model qwen3:8b \
   --session-file .local_codex/session.json
@@ -103,7 +105,7 @@ cargo run --bin local -- \
 Start fresh while keeping the same file path:
 
 ```bash
-cargo run --bin local -- \
+cargo run --bin local-cli -- \
   --provider ollama \
   --text-model qwen3:8b \
   --session-file .local_codex/session.json \
@@ -116,7 +118,7 @@ Auto mode is enabled by default (no permission prompts).
 If you want prompts for shell/plugin/commit/calculator actions, run with:
 
 ```bash
-cargo run --bin local -- \
+cargo run --bin local-cli -- \
   --provider ollama \
   --text-model qwen3:8b \
   --ask-permissions
@@ -127,7 +129,7 @@ cargo run --bin local -- \
 ## OpenAI-Compatible Endpoints
 
 ```bash
-cargo run --bin local -- \
+cargo run --bin local-cli -- \
   --provider openai \
   --endpoint http://127.0.0.1:8000/v1/chat/completions \
   --text-model Qwen/Qwen2.5-Coder-7B-Instruct
