@@ -15,7 +15,7 @@ enum Provider {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "local-codex",
+    name = "local",
     about = "Local open-source coding orchestrator for local/open models"
 )]
 struct Cli {
@@ -59,8 +59,15 @@ struct Cli {
     #[arg(long, default_value_t = 0.1)]
     temperature: f32,
 
-    #[arg(long, alias = "auto-approve")]
+    #[arg(
+        long,
+        alias = "auto-approve",
+        help = "Force auto mode on (auto mode is enabled by default)"
+    )]
     auto_mode: bool,
+
+    #[arg(long, help = "Require approval prompts (disables auto mode)")]
+    ask_permissions: bool,
 
     #[arg(long)]
     memory_file: Option<PathBuf>,
@@ -172,6 +179,8 @@ fn build_settings(cli: Cli) -> Result<RuntimeSettings> {
             .join(cli.workspace)
     };
 
+    let auto_mode = cli.auto_mode || !cli.ask_permissions;
+
     let settings = Settings {
         provider: match cli.provider {
             Provider::Ollama => "ollama".to_string(),
@@ -183,7 +192,7 @@ fn build_settings(cli: Cli) -> Result<RuntimeSettings> {
         routing,
         max_steps: cli.max_steps.max(1),
         shell_timeout_seconds: cli.shell_timeout.max(1),
-        auto_mode: cli.auto_mode,
+        auto_mode,
         temperature: cli.temperature,
         memory_file: cli.memory_file,
         plugins_dir: cli.plugins_dir,
@@ -234,7 +243,7 @@ fn run_once(
 }
 
 fn repl(orchestrator: &mut Orchestrator, session_file: Option<&Path>) -> Result<()> {
-    println!("local-codex interactive mode");
+    println!("local interactive mode");
     println!("Commands: /exit, /quit, /reset, /save [path], /load [path], /reload_plugins");
     println!("Agent commands: /agents, /agent list|new <name>|use <name>|run <name> <prompt>|reset <name>");
     println!("Model routing: /models or /routing");

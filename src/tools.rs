@@ -138,6 +138,11 @@ impl ToolExecutor {
                 &["command:shell command string"],
             ),
             tool_spec(
+                "open_calculator",
+                "Open a desktop calculator application using platform-aware commands.",
+                &[],
+            ),
+            tool_spec(
                 "git_status",
                 "Show git status (short + branch) for the workspace repository.",
                 &[],
@@ -320,6 +325,7 @@ impl ToolExecutor {
                 };
                 self.run_shell(command)
             }
+            "open_calculator" => self.open_calculator(),
             "git_status" => self.git_status(),
             "git_diff" => {
                 let path = map.get("path").and_then(Value::as_str);
@@ -770,6 +776,12 @@ impl ToolExecutor {
     }
 
     fn run_shell(&self, command: &str) -> String {
+        let normalized = command.trim();
+        if normalized.eq_ignore_ascii_case("calc") || normalized.eq_ignore_ascii_case("calculator")
+        {
+            return self.open_calculator();
+        }
+
         if !self.confirm_prompt(&format!("Approve shell command? [y/N]\n$ {command}")) {
             return "DENIED: shell command not approved by user".to_string();
         }
@@ -782,6 +794,75 @@ impl ToolExecutor {
             Ok(result) => self.format_process_output(result),
             Err(err) => format!("ERROR: {err}"),
         }
+    }
+
+    fn open_calculator(&self) -> String {
+        if !self.confirm_prompt("Approve opening calculator? [y/N]") {
+            return "DENIED: calculator launch not approved by user".to_string();
+        }
+
+        let candidates: Vec<Vec<&str>> = if cfg!(target_os = "windows") {
+            vec![vec!["calc.exe"]]
+        } else if cfg!(target_os = "macos") {
+            vec![vec!["open", "-a", "Calculator"]]
+        } else {
+            vec![
+                vec!["gnome-calculator"],
+                vec!["kcalc"],
+                vec!["mate-calc"],
+                vec!["qalculate-gtk"],
+                vec!["galculator"],
+                vec!["xcalc"],
+                vec!["calc"],
+            ]
+        };
+
+        let mut attempts = Vec::new();
+        for candidate in candidates {
+            if candidate.is_empty() {
+                continue;
+            }
+            let cmd = candidate[0];
+            let args = &candidate[1..];
+            match self.launch_detached(cmd, args) {
+                Ok(_) => {
+                    let launched = std::iter::once(cmd)
+                        .chain(args.iter().copied())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    return format!("CALCULATOR_OPENED: {launched}");
+                }
+                Err(err) => attempts.push(format!(
+                    "{}: {}",
+                    std::iter::once(cmd)
+                        .chain(args.iter().copied())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    err
+                )),
+            }
+        }
+
+        format!(
+            "ERROR: no calculator command succeeded. Attempts:\n{}",
+            attempts.join("\n")
+        )
+    }
+
+    fn launch_detached(&self, program: &str, args: &[&str]) -> io::Result<()> {
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .current_dir(&self.workspace_root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let mut child = command.spawn()?;
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
     }
 
     fn git_status(&self) -> String {

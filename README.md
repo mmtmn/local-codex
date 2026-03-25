@@ -1,6 +1,6 @@
-# local-codex
+# local-cli
 
-`local-codex` is a Rust, open-source coding orchestrator for local/open LLM backends.
+`local-cli` is a Rust, open-source coding orchestrator for local/open LLM backends.
 
 It is designed as a practical local alternative focused on useful core workflows:
 - multi-model routing by role (`text`, `planner`, `coder`, `image`)
@@ -9,7 +9,7 @@ It is designed as a practical local alternative focused on useful core workflows
 - persistent memory and session save/load
 - structured code editing tools
 - plugin-style external tools
-- optional full auto mode (no approval prompts)
+- auto mode by default (no approval prompts)
 
 No skills, MCP integration, or external sandbox layer are built in.
 
@@ -25,6 +25,7 @@ No skills, MCP integration, or external sandbox layer are built in.
 - Structured edits: `structured_patch` operations.
 - Symbol-aware Python edits: `python_symbol_overview`, `replace_python_symbol`.
 - Shell execution: `run_shell`.
+- Calculator launcher: `open_calculator` (plus `run_shell` shortcut for `calc`/`calculator`).
 - Git tools: `git_status`, `git_diff`, `git_log`, `git_commit_plan`, `git_commit`, `apply_patch`.
 - Persistent memory: `memory_get`, `memory_set`, `memory_delete`, `memory_search`.
 - Parallel execution: `parallel_tools`.
@@ -49,7 +50,7 @@ If planner/coder/image are omitted, they fall back to `--text-model`.
 ### 2) Run with Ollama + Qwen
 
 ```bash
-cargo run -- \
+cargo run --bin local -- \
   --provider ollama \
   --text-model qwen3:8b \
   --endpoint http://127.0.0.1:11434/api/chat
@@ -57,10 +58,17 @@ cargo run -- \
 
 If your model tag differs, use your installed tag.
 
+Install once so you can just type `local`:
+
+```bash
+cargo install --path .
+local
+```
+
 ### 3) One-shot prompt mode
 
 ```bash
-cargo run -- \
+cargo run --bin local -- \
   --provider ollama \
   --text-model qwen3:8b \
   --prompt "List files and summarize this repository"
@@ -86,7 +94,7 @@ cargo run -- \
 Use `--session-file` to load/save state automatically:
 
 ```bash
-cargo run -- \
+cargo run --bin local -- \
   --provider ollama \
   --text-model qwen3:8b \
   --session-file .local_codex/session.json
@@ -95,30 +103,31 @@ cargo run -- \
 Start fresh while keeping the same file path:
 
 ```bash
-cargo run -- \
+cargo run --bin local -- \
   --provider ollama \
   --text-model qwen3:8b \
   --session-file .local_codex/session.json \
   --fresh-session
 ```
 
-## Auto Mode
+## Approvals
 
-Enable full auto-approve mode (no permission prompts):
+Auto mode is enabled by default (no permission prompts).
+If you want prompts for shell/plugin/commit/calculator actions, run with:
 
 ```bash
-cargo run -- \
+cargo run --bin local -- \
   --provider ollama \
   --text-model qwen3:8b \
-  --auto-mode
+  --ask-permissions
 ```
 
-(`--auto-approve` is accepted as an alias.)
+(`--auto-mode` / `--auto-approve` are still accepted and force auto mode on.)
 
 ## OpenAI-Compatible Endpoints
 
 ```bash
-cargo run -- \
+cargo run --bin local -- \
   --provider openai \
   --endpoint http://127.0.0.1:8000/v1/chat/completions \
   --text-model Qwen/Qwen2.5-Coder-7B-Instruct

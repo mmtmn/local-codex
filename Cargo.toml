@@ -1,13 +1,17 @@
 [package]
-name = "local-codex"
+name = "local-cli"
 version = "0.2.0"
 edition = "2021"
-description = "Local open-source coding orchestrator for local LLMs"
+description = "Local open-source coding orchestrator CLI for local LLMs"
 license = "MIT"
 
 [[bin]]
-name = "local-codex"
+name = "local"
 path = "src/main.rs"
+
+[lib]
+name = "local_codex"
+path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0"
