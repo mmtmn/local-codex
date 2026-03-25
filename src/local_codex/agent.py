@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from local_codex.llm.base import LLMClient, Message
@@ -62,9 +63,11 @@ class Agent:
             tool_specs=tools.render_specs_for_prompt(),
         )
         self._messages: list[Message] = [Message(role="system", content=self._system_prompt)]
+        self.tool_history: list[dict[str, Any]] = []
 
     def reset(self) -> None:
         self._messages = [Message(role="system", content=self._system_prompt)]
+        self.tool_history = []
 
     def run(self, user_prompt: str) -> str:
         self._messages.append(Message(role="user", content=user_prompt))
@@ -95,6 +98,13 @@ class Agent:
                     self.on_tool_event(f"tool {tool_name} {json.dumps(args, ensure_ascii=True)}")
 
                 result = self.tools.execute(tool_name, args)
+                self.tool_history.append(
+                    {
+                        "tool": tool_name,
+                        "args": json.loads(json.dumps(args, ensure_ascii=True)),
+                        "result": result,
+                    }
+                )
 
                 if self.on_tool_event is not None:
                     self.on_tool_event(f"result {result[:240].replace(chr(10), ' ')}")
@@ -118,6 +128,62 @@ class Agent:
             "I hit the max tool step limit before completing the task. "
             "Please retry with a narrower request or higher --max-steps."
         )
+
+    def session_payload(self) -> dict[str, Any]:
+        messages = [{"role": message.role, "content": message.content} for message in self._messages]
+        return {
+            "version": 1,
+            "messages": messages,
+            "tool_history": self.tool_history,
+        }
+
+    def save_session(self, path: str | Path) -> Path:
+        target = Path(path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.session_payload()
+        target.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
+        return target
+
+    def load_session(self, path: str | Path) -> Path:
+        source = Path(path).expanduser()
+        raw = source.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("session payload must be a JSON object")
+
+        raw_messages = payload.get("messages")
+        if not isinstance(raw_messages, list):
+            raise ValueError("session payload missing messages list")
+
+        restored_messages: list[Message] = []
+        for entry in raw_messages:
+            if not isinstance(entry, dict):
+                continue
+            role = entry.get("role")
+            content = entry.get("content")
+            if isinstance(role, str) and isinstance(content, str):
+                restored_messages.append(Message(role=role, content=content))
+
+        # Keep the current system prompt so sessions survive prompt/schema evolution.
+        non_system_messages = [message for message in restored_messages if message.role != "system"]
+        self._messages = [Message(role="system", content=self._system_prompt), *non_system_messages]
+
+        restored_tool_history: list[dict[str, Any]] = []
+        raw_tool_history = payload.get("tool_history")
+        if isinstance(raw_tool_history, list):
+            for entry in raw_tool_history:
+                if not isinstance(entry, dict):
+                    continue
+                tool = entry.get("tool")
+                result = entry.get("result")
+                args = entry.get("args")
+                if not isinstance(tool, str) or not isinstance(result, str):
+                    continue
+                if not isinstance(args, dict):
+                    args = {}
+                restored_tool_history.append({"tool": tool, "args": args, "result": result})
+        self.tool_history = restored_tool_history
+        return source
 
     @staticmethod
     def _parse_action(text: str) -> Action | None:

@@ -26,6 +26,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shell-timeout", type=int, default=45)
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--auto-approve", action="store_true")
+    parser.add_argument(
+        "--session-file",
+        default=None,
+        help="Optional JSON file to persist conversation and tool history",
+    )
+    parser.add_argument(
+        "--fresh-session",
+        action="store_true",
+        help="Ignore any existing --session-file and start a new session",
+    )
     parser.add_argument("--prompt", default=None, help="Run one prompt non-interactively")
     return parser
 
@@ -66,15 +76,17 @@ def make_client(settings: Settings) -> LLMClient:
     )
 
 
-def run_once(agent: Agent, prompt: str) -> int:
+def run_once(agent: Agent, prompt: str, session_file: Path | None = None) -> int:
     response = agent.run(prompt)
     print(response)
+    if session_file is not None:
+        agent.save_session(session_file)
     return 0
 
 
-def repl(agent: Agent) -> int:
+def repl(agent: Agent, session_file: Path | None = None) -> int:
     print("local-codex interactive mode")
-    print("Commands: /exit, /quit, /reset")
+    print("Commands: /exit, /quit, /reset, /save [path], /load [path]")
 
     while True:
         try:
@@ -86,12 +98,45 @@ def repl(agent: Agent) -> int:
         if not user_input:
             continue
 
-        if user_input in {"/exit", "/quit"}:
-            return 0
+        if user_input.startswith("/"):
+            command, _, rest = user_input.partition(" ")
+            argument = rest.strip()
 
-        if user_input == "/reset":
-            agent.reset()
-            print("Conversation reset.")
+            if command in {"/exit", "/quit"}:
+                return 0
+
+            if command == "/reset":
+                agent.reset()
+                print("Conversation reset.")
+                continue
+
+            if command == "/save":
+                target = Path(argument).expanduser() if argument else session_file
+                if target is None:
+                    print("assistant> error: no session path provided")
+                    continue
+                try:
+                    saved_to = agent.save_session(target)
+                except Exception as exc:  # noqa: BLE001 - CLI should keep running
+                    print(f"assistant> error: {exc}")
+                    continue
+                print(f"assistant> session saved: {saved_to}")
+                continue
+
+            if command == "/load":
+                target = Path(argument).expanduser() if argument else session_file
+                if target is None:
+                    print("assistant> error: no session path provided")
+                    continue
+                try:
+                    loaded_from = agent.load_session(target)
+                except Exception as exc:  # noqa: BLE001 - CLI should keep running
+                    print(f"assistant> error: {exc}")
+                    continue
+                print(f"assistant> session loaded: {loaded_from}")
+                continue
+
+            print(f"assistant> error: unknown command {command}")
             continue
 
         try:
@@ -101,6 +146,11 @@ def repl(agent: Agent) -> int:
             continue
 
         print(f"assistant> {answer}")
+        if session_file is not None:
+            try:
+                agent.save_session(session_file)
+            except Exception as exc:  # noqa: BLE001 - CLI should keep running
+                print(f"assistant> warning: failed to save session: {exc}")
 
 
 def main() -> None:
@@ -127,10 +177,22 @@ def main() -> None:
         on_tool_event=on_tool_event,
     )
 
-    if args.prompt:
-        raise SystemExit(run_once(agent, args.prompt))
+    session_file: Path | None = None
+    if args.session_file:
+        session_file = Path(args.session_file).expanduser()
+        if session_file.exists() and not args.fresh_session:
+            try:
+                agent.load_session(session_file)
+                print(f"Loaded session: {session_file}")
+            except Exception as exc:  # noqa: BLE001 - startup should continue
+                print(f"Warning: failed to load session {session_file}: {exc}")
+        elif args.fresh_session and session_file.exists():
+            print(f"Starting fresh session. Ignoring existing file: {session_file}")
 
-    raise SystemExit(repl(agent))
+    if args.prompt:
+        raise SystemExit(run_once(agent, args.prompt, session_file=session_file))
+
+    raise SystemExit(repl(agent, session_file=session_file))
 
 
 if __name__ == "__main__":

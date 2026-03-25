@@ -11,7 +11,11 @@
   - `read_file`
   - `write_file`
   - `run_shell`
+  - `git_status`
+  - `git_diff`
+  - `apply_patch`
 - Restricts file operations to your workspace root.
+- Supports session persistence (save/load chat and tool history).
 
 ## Quickstart
 
@@ -51,6 +55,26 @@ Create a hello world script and run it.
 local-codex --provider ollama --model qwen3:8b --prompt "List the files in this project"
 ```
 
+## Session persistence
+
+Use `--session-file` to auto-load and auto-save a session:
+
+```bash
+local-codex --provider ollama --model qwen3:8b --session-file .local_codex_session.json
+```
+
+Start fresh while keeping the same session path:
+
+```bash
+local-codex --provider ollama --model qwen3:8b --session-file .local_codex_session.json --fresh-session
+```
+
+In interactive mode:
+
+- `/save [path]` saves the current session.
+- `/load [path]` loads a session.
+- `/reset` clears current in-memory conversation/history.
+
 ## OpenAI-compatible local endpoints
 
 You can also target local servers that expose OpenAI-compatible chat completions:
@@ -73,11 +97,10 @@ export OPENAI_API_KEY=your_key
 - `run_shell` executes commands in your workspace directory.
 - By default, shell commands require approval at runtime.
 - Use `--auto-approve` to allow all shell commands without prompts.
+- `apply_patch` validates patch paths and rejects unsafe targets (for example `../` escapes).
 
-## Roadmap ideas
+## Tests
 
-- Persistent memory and task sessions.
-- Git-aware workflows (diffs, commit planning, patch mode).
-- Smarter code editing tools (structured patch tool, symbol-aware edits).
-- Plugin-style tool system.
-- Multi-agent decomposition and parallel tool execution.
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```

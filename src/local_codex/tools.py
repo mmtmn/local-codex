@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -67,6 +67,27 @@ class ToolExecutor:
                     "command": "shell command string",
                 },
             ),
+            ToolSpec(
+                name="git_status",
+                description="Show git status (short + branch) for the workspace repository.",
+                args={},
+            ),
+            ToolSpec(
+                name="git_diff",
+                description="Show git diff for workspace, optionally for a specific path.",
+                args={
+                    "path": "optional path relative to workspace",
+                    "staged": "optional boolean, default false",
+                    "unified": "optional context lines, default 3",
+                },
+            ),
+            ToolSpec(
+                name="apply_patch",
+                description="Apply a unified diff patch using `git apply`.",
+                args={
+                    "patch": "unified diff text",
+                },
+            ),
         ]
 
     def render_specs_for_prompt(self) -> str:
@@ -101,6 +122,18 @@ class ToolExecutor:
                 )
             if tool_name == "run_shell":
                 return self._run_shell(command=str(args["command"]))
+            if tool_name == "git_status":
+                return self._git_status()
+            if tool_name == "git_diff":
+                path_value = args.get("path")
+                path = None if path_value is None else str(path_value)
+                return self._git_diff(
+                    path=path,
+                    staged=bool(args.get("staged", False)),
+                    unified=int(args.get("unified", 3)),
+                )
+            if tool_name == "apply_patch":
+                return self._apply_patch(patch=str(args["patch"]))
 
             return f"ERROR: unknown tool '{tool_name}'"
         except KeyError as exc:
@@ -216,4 +249,161 @@ class ToolExecutor:
             f"EXIT_CODE: {completed.returncode}\n"
             f"STDOUT:\n{stdout or '<empty>'}\n"
             f"STDERR:\n{stderr or '<empty>'}"
+        )
+
+    def _git_status(self) -> str:
+        git_error = self._require_git_repo()
+        if git_error is not None:
+            return git_error
+
+        completed = subprocess.run(
+            ["git", "-C", str(self.workspace_root), "status", "--short", "--branch"],
+            capture_output=True,
+            text=True,
+            timeout=self.shell_timeout_seconds,
+        )
+        return self._format_process_output(completed.returncode, completed.stdout, completed.stderr)
+
+    def _git_diff(self, path: str | None = None, staged: bool = False, unified: int = 3) -> str:
+        git_error = self._require_git_repo()
+        if git_error is not None:
+            return git_error
+
+        safe_unified = max(0, min(unified, 20))
+        command = [
+            "git",
+            "-C",
+            str(self.workspace_root),
+            "diff",
+            "--no-color",
+            f"--unified={safe_unified}",
+        ]
+        if staged:
+            command.append("--staged")
+
+        if path:
+            resolved = self._resolve(path)
+            rel = resolved.relative_to(self.workspace_root)
+            command.extend(["--", rel.as_posix()])
+
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=self.shell_timeout_seconds,
+        )
+        if completed.returncode == 0 and not completed.stdout.strip():
+            return "NO_DIFF: no changes for selected scope"
+        return self._format_process_output(completed.returncode, completed.stdout, completed.stderr)
+
+    def _apply_patch(self, patch: str) -> str:
+        if not patch.strip():
+            return "ERROR: patch is empty"
+
+        git_error = self._require_git_repo()
+        if git_error is not None:
+            return git_error
+
+        invalid_path = self._find_unsafe_patch_path(patch)
+        if invalid_path is not None:
+            return f"ERROR: unsafe patch path '{invalid_path}'"
+
+        completed = subprocess.run(
+            ["git", "-C", str(self.workspace_root), "apply", "--whitespace=nowarn", "-"],
+            input=patch,
+            capture_output=True,
+            text=True,
+            timeout=self.shell_timeout_seconds,
+        )
+        if completed.returncode != 0:
+            return (
+                "ERROR: git apply failed\n"
+                + self._format_process_output(completed.returncode, completed.stdout, completed.stderr)
+            )
+
+        status = subprocess.run(
+            ["git", "-C", str(self.workspace_root), "status", "--short"],
+            capture_output=True,
+            text=True,
+            timeout=self.shell_timeout_seconds,
+        )
+        git_status = status.stdout.strip() or "<clean>"
+        if len(git_status) > 4000:
+            git_status = git_status[:4000] + "\n... status truncated ..."
+        return f"PATCH APPLIED\nGIT_STATUS:\n{git_status}"
+
+    def _require_git_repo(self) -> str | None:
+        completed = subprocess.run(
+            ["git", "-C", str(self.workspace_root), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=self.shell_timeout_seconds,
+        )
+        if completed.returncode != 0 or completed.stdout.strip() != "true":
+            return "ERROR: workspace is not a git repository"
+        return None
+
+    @staticmethod
+    def _normalize_patch_path(raw: str) -> str | None:
+        value = raw.strip().strip('"').strip("'")
+        if not value:
+            return None
+        if value == "/dev/null":
+            return None
+        if value.startswith("a/") or value.startswith("b/"):
+            value = value[2:]
+        if value == "dev/null":
+            return None
+        return value
+
+    def _find_unsafe_patch_path(self, patch: str) -> str | None:
+        for line in patch.splitlines():
+            candidate: str | None = None
+            if line.startswith("diff --git "):
+                parts = line.split()
+                if len(parts) >= 4:
+                    for raw in (parts[2], parts[3]):
+                        normalized = self._normalize_patch_path(raw)
+                        if normalized and self._is_unsafe_patch_path(normalized):
+                            return normalized
+                continue
+            if line.startswith("--- ") or line.startswith("+++ "):
+                candidate = line[4:].strip().split("\t", 1)[0]
+            elif line.startswith("rename from "):
+                candidate = line[len("rename from ") :].strip()
+            elif line.startswith("rename to "):
+                candidate = line[len("rename to ") :].strip()
+
+            normalized = self._normalize_patch_path(candidate or "")
+            if normalized and self._is_unsafe_patch_path(normalized):
+                return normalized
+        return None
+
+    def _is_unsafe_patch_path(self, path_value: str) -> bool:
+        if "\\" in path_value:
+            return True
+
+        path = PurePosixPath(path_value)
+        if path.is_absolute():
+            return True
+        if any(part == ".." for part in path.parts):
+            return True
+        if path.parts and ":" in path.parts[0]:
+            return True
+
+        resolved = (self.workspace_root / Path(*path.parts)).resolve()
+        return not _is_relative_to(resolved, self.workspace_root)
+
+    @staticmethod
+    def _format_process_output(returncode: int, stdout: str, stderr: str) -> str:
+        clean_stdout = stdout.strip()
+        clean_stderr = stderr.strip()
+        if len(clean_stdout) > 12000:
+            clean_stdout = clean_stdout[:12000] + "\n... stdout truncated ..."
+        if len(clean_stderr) > 12000:
+            clean_stderr = clean_stderr[:12000] + "\n... stderr truncated ..."
+        return (
+            f"EXIT_CODE: {returncode}\n"
+            f"STDOUT:\n{clean_stdout or '<empty>'}\n"
+            f"STDERR:\n{clean_stderr or '<empty>'}"
         )
