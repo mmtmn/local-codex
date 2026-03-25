@@ -1,162 +1,154 @@
 # local-codex
 
-`local-codex` is a lightweight open-source coding assistant CLI designed to run with local LLMs (starting with Qwen via Ollama).
+`local-codex` is a Rust, open-source coding orchestrator for local/open LLM backends.
 
-## What this MVP does
+It is designed as a practical local alternative focused on useful core workflows:
+- multi-model routing by role (`text`, `planner`, `coder`, `image`)
+- named agents and delegated subtasks
+- git-aware coding tools
+- persistent memory and session save/load
+- structured code editing tools
+- plugin-style external tools
+- optional full auto mode (no approval prompts)
 
-- Runs an interactive terminal coding assistant loop.
-- Uses a local model through Ollama (`/api/chat`) or any OpenAI-compatible endpoint.
-- Lets the model use core coding tools:
-  - `list_files`
-  - `read_file`
-  - `write_file`
-  - `replace_in_file`
-  - `structured_patch`
-  - `python_symbol_overview`
-  - `replace_python_symbol`
-  - `run_shell`
-  - `git_status`
-  - `git_diff`
-  - `git_log`
-  - `git_commit_plan`
-  - `git_commit`
-  - `apply_patch`
-  - `memory_get` / `memory_set` / `memory_delete` / `memory_search`
-  - `parallel_tools`
-- Supports plugin-style tools loaded from `.local_codex/plugins/*.json`.
-- Supports task decomposition through delegated sub-agents (`delegate` action type).
-- Restricts file operations and patch targets to your workspace root.
-- Supports persistent sessions and memory.
+No skills, MCP integration, or external sandbox layer are built in.
+
+## Features
+
+### Orchestration
+- JSON action loop with tool calls, parallel tool calls, and delegation.
+- Named agents (`/agent new`, `/agent use`, `/agent run`) for task decomposition.
+- Delegation depth control with `--max-delegation-depth`.
+
+### Tooling
+- File tools: `list_files`, `read_file`, `write_file`, `replace_in_file`.
+- Structured edits: `structured_patch` operations.
+- Symbol-aware Python edits: `python_symbol_overview`, `replace_python_symbol`.
+- Shell execution: `run_shell`.
+- Git tools: `git_status`, `git_diff`, `git_log`, `git_commit_plan`, `git_commit`, `apply_patch`.
+- Persistent memory: `memory_get`, `memory_set`, `memory_delete`, `memory_search`.
+- Parallel execution: `parallel_tools`.
+- Plugin tools loaded from `.local_codex/plugins/*.json`.
+
+### Model Routing
+Choose models per role at CLI startup:
+- `--text-model`
+- `--planner-model`
+- `--coder-model`
+- `--image-model`
+
+If planner/coder/image are omitted, they fall back to `--text-model`.
 
 ## Quickstart
 
-1. Make sure Python 3.11+ is installed.
-2. Make sure Ollama is running and your Qwen model is available.
+### 1) Prerequisites
+- Rust toolchain (`cargo`)
+- A local or remote chat-completions backend
+  - Ollama example: Qwen model installed locally
 
-Example (model name may vary based on your install):
-
-```bash
-ollama list
-# then use the exact model name below
-```
-
-3. Create a virtual environment and install this package in editable mode:
+### 2) Run with Ollama + Qwen
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e .
-```
-
-4. Start the assistant:
-
-```bash
-local-codex --provider ollama --model qwen3:8b
-```
-
-5. Type a request, for example:
-
-```text
-Create a hello world script and run it.
-```
-
-## Non-interactive mode
-
-```bash
-local-codex --provider ollama --model qwen3:8b --prompt "List the files in this project"
-```
-
-## Session persistence
-
-Use `--session-file` to auto-load and auto-save a session:
-
-```bash
-local-codex --provider ollama --model qwen3:8b --session-file .local_codex_session.json
-```
-
-Start fresh while keeping the same session path:
-
-```bash
-local-codex --provider ollama --model qwen3:8b --session-file .local_codex_session.json --fresh-session
-```
-
-In interactive mode:
-
-- `/save [path]` saves the current session.
-- `/load [path]` loads a session.
-- `/reset` clears current in-memory conversation/history.
-- `/reload_plugins` reloads plugin tools from disk.
-
-## Persistent memory
-
-By default memory is stored at `.local_codex/memory.json`. Override it:
-
-```bash
-local-codex \
+cargo run -- \
   --provider ollama \
-  --model qwen3:8b \
-  --memory-file .local_codex/memory.json
+  --text-model qwen3:8b \
+  --endpoint http://127.0.0.1:11434/api/chat
 ```
 
-The model can use memory tools to keep long-lived project context.
+If your model tag differs, use your installed tag.
 
-## Plugin tools
-
-By default plugin specs are loaded from `.local_codex/plugins/*.json`. Override:
+### 3) One-shot prompt mode
 
 ```bash
-local-codex \
+cargo run -- \
   --provider ollama \
-  --model qwen3:8b \
-  --plugins-dir .local_codex/plugins
+  --text-model qwen3:8b \
+  --prompt "List files and summarize this repository"
 ```
 
-Minimal plugin spec example:
+## Interactive Commands
 
-```json
-{
-  "name": "echo",
-  "description": "Echo a value from tool args",
-  "command": ["python3", "-c", "import json,sys; p=json.load(sys.stdin); print(p.get('value',''))"],
-  "args_schema": { "value": "value to print" }
-}
-```
+- `/exit`, `/quit`
+- `/reset`
+- `/save [path]`
+- `/load [path]`
+- `/reload_plugins`
+- `/models` or `/routing`
+- `/agents`
+- `/agent list`
+- `/agent new <name>`
+- `/agent use <name>`
+- `/agent run <name> <prompt>`
+- `/agent reset <name>`
 
-This exposes a new tool named `plugin.echo`.
+## Session Persistence
 
-## Multi-Agent And Parallelism
-
-- The model can return `{\"type\":\"parallel_tools\", ...}` to run multiple tools concurrently.
-- The model can return `{\"type\":\"delegate\", ...}` to spin a bounded sub-agent for a subtask.
-- Control max delegate depth with `--max-delegation-depth` (default `2`).
-
-## OpenAI-compatible local endpoints
-
-You can also target local servers that expose OpenAI-compatible chat completions:
+Use `--session-file` to load/save state automatically:
 
 ```bash
-local-codex \
+cargo run -- \
+  --provider ollama \
+  --text-model qwen3:8b \
+  --session-file .local_codex/session.json
+```
+
+Start fresh while keeping the same file path:
+
+```bash
+cargo run -- \
+  --provider ollama \
+  --text-model qwen3:8b \
+  --session-file .local_codex/session.json \
+  --fresh-session
+```
+
+## Auto Mode
+
+Enable full auto-approve mode (no permission prompts):
+
+```bash
+cargo run -- \
+  --provider ollama \
+  --text-model qwen3:8b \
+  --auto-mode
+```
+
+(`--auto-approve` is accepted as an alias.)
+
+## OpenAI-Compatible Endpoints
+
+```bash
+cargo run -- \
   --provider openai \
   --endpoint http://127.0.0.1:8000/v1/chat/completions \
-  --model Qwen/Qwen2.5-Coder-7B-Instruct
+  --text-model Qwen/Qwen2.5-Coder-7B-Instruct
 ```
 
-If your server requires an API key, set:
+If needed:
 
 ```bash
 export OPENAI_API_KEY=your_key
 ```
 
-## Safety notes
+## Plugin Tool Specs
 
-- `run_shell` executes commands in your workspace directory.
-- By default, shell commands require approval at runtime.
-- Use `--auto-approve` to allow all shell commands without prompts.
-- `apply_patch` validates patch paths and rejects unsafe targets (for example `../` escapes).
-- Plugin commands also require approval unless `--auto-approve` is enabled.
+Place JSON files in `.local_codex/plugins/` (or override with `--plugins-dir`).
+
+Example:
+
+```json
+{
+  "name": "echo",
+  "description": "Echo a value",
+  "command": ["python3", "-c", "import json,sys; p=json.load(sys.stdin); print(p.get('value',''))"],
+  "args_schema": {"value": "value to echo"}
+}
+```
+
+This creates `plugin.echo`.
 
 ## Tests
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+cargo test
 ```
