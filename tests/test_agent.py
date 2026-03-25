@@ -47,7 +47,55 @@ class AgentParsingTest(unittest.TestCase):
         action = Agent._parse_action("not json")
         self.assertIsNone(action)
 
-    def test_session_round_trip_restores_messages_and_tool_history(self) -> None:
+    def test_parallel_action_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            (workspace / "a.txt").write_text("hello\n", encoding="utf-8")
+
+            tools = ToolExecutor(workspace_root=workspace, auto_approve=True)
+            llm = StubLLM(
+                [
+                    (
+                        '{"type":"parallel_tools","calls":['
+                        '{"tool":"read_file","args":{"path":"a.txt"}},'
+                        '{"tool":"list_files","args":{"path":".","max_depth":1}}]}'
+                    ),
+                    '{"type":"final","message":"done"}',
+                ]
+            )
+
+            agent = Agent(llm=llm, tools=tools, workspace_root=str(workspace), max_steps=4)
+            final_message = agent.run("Inspect files in parallel")
+            self.assertEqual(final_message, "done")
+            self.assertEqual(len(agent.tool_history), 1)
+            self.assertEqual(agent.tool_history[0]["tool"], "parallel_tools")
+
+    def test_delegate_action_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            tools = ToolExecutor(workspace_root=workspace, auto_approve=True)
+
+            llm = StubLLM(
+                [
+                    '{"type":"delegate","prompt":"do subtask","max_steps":2}',
+                    '{"type":"final","message":"subtask done"}',
+                    '{"type":"final","message":"all done"}',
+                ]
+            )
+
+            agent = Agent(
+                llm=llm,
+                tools=tools,
+                workspace_root=str(workspace),
+                max_steps=5,
+                max_delegation_depth=2,
+            )
+            final_message = agent.run("Solve this via delegate")
+            self.assertEqual(final_message, "all done")
+            self.assertEqual(len(agent.delegate_history), 1)
+            self.assertIn("subtask done", agent.delegate_history[0]["result"])
+
+    def test_session_round_trip_restores_histories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             tools = ToolExecutor(workspace_root=workspace, auto_approve=True)
@@ -62,6 +110,7 @@ class AgentParsingTest(unittest.TestCase):
             final_message = agent.run("List files then finish")
             self.assertEqual(final_message, "done")
             self.assertEqual(len(agent.tool_history), 1)
+            self.assertEqual(len(agent.delegate_history), 0)
 
             session_file = workspace / "session.json"
             saved = agent.save_session(session_file)
@@ -79,6 +128,7 @@ class AgentParsingTest(unittest.TestCase):
             payload = new_agent.session_payload()
             self.assertGreater(len(payload["messages"]), 1)
             self.assertEqual(len(payload["tool_history"]), 1)
+            self.assertEqual(len(payload["delegate_history"]), 0)
 
 
 if __name__ == "__main__":

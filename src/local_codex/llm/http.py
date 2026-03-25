@@ -13,7 +13,7 @@ def post_json(
     url: str,
     payload: dict,
     headers: dict[str, str] | None = None,
-    timeout_seconds: int = 180,
+    timeout_seconds: int = 600,
 ) -> dict:
     merged_headers = {
         "Content-Type": "application/json",

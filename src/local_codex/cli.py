@@ -27,6 +27,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--auto-approve", action="store_true")
     parser.add_argument(
+        "--memory-file",
+        default=None,
+        help="Optional JSON file for persistent memory (default .local_codex/memory.json)",
+    )
+    parser.add_argument(
+        "--plugins-dir",
+        default=None,
+        help="Optional directory for plugin tool JSON specs (default .local_codex/plugins)",
+    )
+    parser.add_argument(
+        "--max-delegation-depth",
+        type=int,
+        default=2,
+        help="Maximum depth for delegate sub-agents",
+    )
+    parser.add_argument(
         "--session-file",
         default=None,
         help="Optional JSON file to persist conversation and tool history",
@@ -62,6 +78,9 @@ def make_settings(args: argparse.Namespace) -> Settings:
         shell_timeout_seconds=max(1, args.shell_timeout),
         auto_approve=bool(args.auto_approve),
         temperature=args.temperature,
+        memory_file=Path(args.memory_file).expanduser() if args.memory_file else None,
+        plugins_dir=Path(args.plugins_dir).expanduser() if args.plugins_dir else None,
+        max_delegation_depth=max(0, args.max_delegation_depth),
     )
 
 
@@ -86,7 +105,7 @@ def run_once(agent: Agent, prompt: str, session_file: Path | None = None) -> int
 
 def repl(agent: Agent, session_file: Path | None = None) -> int:
     print("local-codex interactive mode")
-    print("Commands: /exit, /quit, /reset, /save [path], /load [path]")
+    print("Commands: /exit, /quit, /reset, /save [path], /load [path], /reload_plugins")
 
     while True:
         try:
@@ -136,6 +155,11 @@ def repl(agent: Agent, session_file: Path | None = None) -> int:
                 print(f"assistant> session loaded: {loaded_from}")
                 continue
 
+            if command == "/reload_plugins":
+                result = agent.tools.execute("reload_plugins", {})
+                print(f"assistant> {result}")
+                continue
+
             print(f"assistant> error: unknown command {command}")
             continue
 
@@ -162,6 +186,8 @@ def main() -> None:
         workspace_root=settings.workspace_resolved,
         auto_approve=settings.auto_approve,
         shell_timeout_seconds=settings.shell_timeout_seconds,
+        memory_file=settings.memory_file_resolved,
+        plugins_dir=settings.plugins_dir_resolved,
     )
     client = make_client(settings)
 
@@ -175,6 +201,7 @@ def main() -> None:
         max_steps=settings.max_steps,
         temperature=settings.temperature,
         on_tool_event=on_tool_event,
+        max_delegation_depth=settings.max_delegation_depth,
     )
 
     session_file: Path | None = None

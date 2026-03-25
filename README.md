@@ -10,12 +10,23 @@
   - `list_files`
   - `read_file`
   - `write_file`
+  - `replace_in_file`
+  - `structured_patch`
+  - `python_symbol_overview`
+  - `replace_python_symbol`
   - `run_shell`
   - `git_status`
   - `git_diff`
+  - `git_log`
+  - `git_commit_plan`
+  - `git_commit`
   - `apply_patch`
-- Restricts file operations to your workspace root.
-- Supports session persistence (save/load chat and tool history).
+  - `memory_get` / `memory_set` / `memory_delete` / `memory_search`
+  - `parallel_tools`
+- Supports plugin-style tools loaded from `.local_codex/plugins/*.json`.
+- Supports task decomposition through delegated sub-agents (`delegate` action type).
+- Restricts file operations and patch targets to your workspace root.
+- Supports persistent sessions and memory.
 
 ## Quickstart
 
@@ -74,6 +85,50 @@ In interactive mode:
 - `/save [path]` saves the current session.
 - `/load [path]` loads a session.
 - `/reset` clears current in-memory conversation/history.
+- `/reload_plugins` reloads plugin tools from disk.
+
+## Persistent memory
+
+By default memory is stored at `.local_codex/memory.json`. Override it:
+
+```bash
+local-codex \
+  --provider ollama \
+  --model qwen3:8b \
+  --memory-file .local_codex/memory.json
+```
+
+The model can use memory tools to keep long-lived project context.
+
+## Plugin tools
+
+By default plugin specs are loaded from `.local_codex/plugins/*.json`. Override:
+
+```bash
+local-codex \
+  --provider ollama \
+  --model qwen3:8b \
+  --plugins-dir .local_codex/plugins
+```
+
+Minimal plugin spec example:
+
+```json
+{
+  "name": "echo",
+  "description": "Echo a value from tool args",
+  "command": ["python3", "-c", "import json,sys; p=json.load(sys.stdin); print(p.get('value',''))"],
+  "args_schema": { "value": "value to print" }
+}
+```
+
+This exposes a new tool named `plugin.echo`.
+
+## Multi-Agent And Parallelism
+
+- The model can return `{\"type\":\"parallel_tools\", ...}` to run multiple tools concurrently.
+- The model can return `{\"type\":\"delegate\", ...}` to spin a bounded sub-agent for a subtask.
+- Control max delegate depth with `--max-delegation-depth` (default `2`).
 
 ## OpenAI-compatible local endpoints
 
@@ -98,6 +153,7 @@ export OPENAI_API_KEY=your_key
 - By default, shell commands require approval at runtime.
 - Use `--auto-approve` to allow all shell commands without prompts.
 - `apply_patch` validates patch paths and rejects unsafe targets (for example `../` escapes).
+- Plugin commands also require approval unless `--auto-approve` is enabled.
 
 ## Tests
 
